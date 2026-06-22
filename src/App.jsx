@@ -1,110 +1,101 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 const CURRENCIES = [
-  { code: 'USD', symbol: '$', label: 'USD' },
-  { code: 'EUR', symbol: '€', label: 'EUR' },
-  { code: 'GBP', symbol: '£', label: 'GBP' },
-  { code: 'INR', symbol: '₹', label: 'INR' },
+  { code: 'USD', symbol: '$' },
+  { code: 'EUR', symbol: '€' },
+  { code: 'GBP', symbol: '£' },
+  { code: 'INR', symbol: '₹' },
 ]
 
 function fmt(n, currency = 'USD') {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(n)
 }
 
-function roundUp(shares) {
-  return shares.map(s => Math.ceil(s))
-}
-
 function splitEvenly(total, count) {
   const base = Math.floor((total * 100) / count)
-  const remainder = Math.round(total * 100) - base * count
-  return Array.from({ length: count }, (_, i) => (base + (i < remainder ? 1 : 0)) / 100)
+  const rem = Math.round(total * 100) - base * count
+  return Array.from({ length: count }, (_, i) => (base + (i < rem ? 1 : 0)) / 100)
 }
 
-function pickWeighted(members, history, fairMode) {
-  if (!fairMode || members.length <= 1) {
+function pickWeighted(members, history, fair) {
+  if (!fair || members.length <= 1)
     return members[Math.floor(Math.random() * members.length)]
-  }
   const counts = members.map(m => history[m.id] ?? 0)
-  const maxCount = Math.max(...counts)
-  const weights = counts.map(c => Math.pow(2, maxCount - c) + 1)
+  const max = Math.max(...counts)
+  const weights = counts.map(c => Math.pow(2, max - c) + 1)
   const total = weights.reduce((a, b) => a + b, 0)
   let r = Math.random() * total
-  for (let i = 0; i < members.length; i++) {
-    r -= weights[i]
-    if (r <= 0) return members[i]
-  }
+  for (let i = 0; i < members.length; i++) { r -= weights[i]; if (r <= 0) return members[i] }
   return members[members.length - 1]
 }
 
-function getOdds(members, history, fairMode) {
-  if (!fairMode || members.length <= 1) {
-    const pct = Math.round(100 / members.length)
-    return members.map(() => pct)
-  }
-  const counts = members.map(m => history[m.id] ?? 0)
-  const maxCount = Math.max(...counts)
-  const weights = counts.map(c => Math.pow(2, maxCount - c) + 1)
-  const total = weights.reduce((a, b) => a + b, 0)
-  return weights.map(w => Math.round((w / total) * 100))
-}
-
-function buzz(pattern) {
-  try { if (navigator?.vibrate) navigator.vibrate(pattern) } catch { /* ignore */ }
-}
+function buzz(ms) { try { navigator?.vibrate?.(ms) } catch { } }
 
 function useReducedMotion() {
-  const [reduced, setReduced] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const handler = e => setReduced(e.matches)
-    mq.addEventListener('change', handler)
-    return () => mq.removeEventListener('change', handler)
-  }, [])
-  return reduced
+  const [v, setV] = useState(() => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  useEffect(() => { const mq = window.matchMedia('(prefers-reduced-motion: reduce)'); const h = e => setV(e.matches); mq.addEventListener('change', h); return () => mq.removeEventListener('change', h) }, [])
+  return v
 }
 
 function nowString() {
-  return new Date().toLocaleString('en-US', {
-    month: '2-digit', day: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
-  })
+  return new Date().toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
 }
 
-function headerTimestamp() {
-  const d = new Date()
-  const date = d.toLocaleDateString('en-US', { weekday: 'short', month: '2-digit', day: '2-digit', year: 'numeric' })
-  const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-  return `${date}  ${time}`
+// ─── data ────────────────────────────────────────────────────────────────────
+
+let _id = 1
+const uid = () => _id++
+const newMember = () => ({ id: uid(), name: '' })
+
+const MODES = [
+  { key: 'one-pays',  emoji: '🎯', title: 'One Person Pays',  desc: 'Random draw — one unlucky person covers the whole thing.' },
+  { key: 'split',     emoji: '✂️', title: 'Split Evenly',     desc: 'Divide the bill equally between everyone.' },
+  { key: 'loser-tip', emoji: '💸', title: 'Tip Roulette',     desc: 'Split the bill, but one random person also pays the tip.' },
+]
+
+const TIP_PRESETS = [10, 15, 18, 20, 25]
+
+const AVATAR_BG = ['#e74c3c','#e67e22','#2ecc71','#3498db','#9b59b6','#1abc9c','#e91e63','#ff5722','#607d8b','#795548']
+
+// ─── tiny shared styles ───────────────────────────────────────────────────────
+
+const card = {
+  background: '#fff', borderRadius: 20,
+  boxShadow: '0 2px 16px rgba(0,0,0,0.08)', overflow: 'hidden',
+}
+
+const primaryBtn = {
+  width: '100%', padding: '17px 24px', border: 'none', borderRadius: 16,
+  background: '#DC2626', color: '#fff', fontSize: 17, fontWeight: 800,
+  cursor: 'pointer', fontFamily: 'inherit', letterSpacing: '0.02em',
+  WebkitTapHighlightColor: 'transparent', transition: 'opacity 0.15s',
+}
+
+const ghostBtn = {
+  padding: '14px 20px', border: '1.5px solid #E5E7EB', borderRadius: 14,
+  background: '#fff', color: '#374151', fontSize: 15, fontWeight: 700,
+  cursor: 'pointer', fontFamily: 'inherit', WebkitTapHighlightColor: 'transparent',
 }
 
 // ─── confetti ─────────────────────────────────────────────────────────────────
 
-function Confetti({ show }) {
-  const pieces = useRef(
-    Array.from({ length: 64 }, (_, i) => ({
-      left: Math.random() * 100,
-      delay: Math.random() * 0.5,
-      dur: 1.8 + Math.random() * 1.4,
-      size: 7 + Math.random() * 9,
-      rot: Math.random() * 360,
-      color: ['#dc2626','#f59e0b','#10b981','#3b82f6','#a855f7','#ec4899'][i % 6],
-    }))
-  ).current
-  if (!show) return null
+const PIECES = Array.from({ length: 70 }, (_, i) => ({
+  x: Math.random() * 100, d: Math.random() * 0.5,
+  t: 2 + Math.random() * 1.5, s: 8 + Math.random() * 9, r: Math.random() * 360,
+  c: ['#DC2626','#F59E0B','#10B981','#3B82F6','#8B5CF6','#EC4899'][i % 6],
+}))
+
+function Confetti({ on }) {
+  if (!on) return null
   return (
-    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 60 }} aria-hidden="true">
-      {pieces.map((p, i) => (
+    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 200 }} aria-hidden="true">
+      {PIECES.map((p, i) => (
         <div key={i} style={{
-          position: 'absolute', top: -24, left: `${p.left}%`,
-          width: p.size, height: p.size * 0.55,
-          background: p.color, borderRadius: 2,
-          transform: `rotate(${p.rot}deg)`,
-          animation: `confetti-fall ${p.dur}s ${p.delay}s cubic-bezier(.3,.6,.5,1) forwards`,
+          position: 'absolute', top: -20, left: `${p.x}%`,
+          width: p.s, height: p.s * 0.5, background: p.c, borderRadius: i % 3 === 0 ? '50%' : 2,
+          animation: `cf ${p.t}s ${p.d}s ease-in forwards`,
         }} />
       ))}
     </div>
@@ -113,194 +104,614 @@ function Confetti({ show }) {
 
 // ─── toast ────────────────────────────────────────────────────────────────────
 
-function Toast({ message }) {
-  if (!message) return null
+function Toast({ msg }) {
+  if (!msg) return null
   return (
     <div role="status" style={{
-      position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-      background: '#1c1917', color: '#faf9f7', padding: '12px 22px',
-      borderRadius: 10, fontSize: 14, fontWeight: 600, zIndex: 70,
-      boxShadow: '0 8px 24px rgba(0,0,0,0.4)', maxWidth: '90vw', textAlign: 'center',
-      animation: 'toast-in 0.25s ease', whiteSpace: 'nowrap',
+      position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
+      background: '#111', color: '#fff', padding: '12px 22px', borderRadius: 12,
+      fontSize: 14, fontWeight: 600, zIndex: 300, maxWidth: '90vw', textAlign: 'center',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.4)', animation: 'toast-in 0.25s ease', whiteSpace: 'nowrap',
     }}>
-      {message}
+      {msg}
     </div>
   )
 }
 
-// ─── receipt chrome ───────────────────────────────────────────────────────────
+// ─── step header ─────────────────────────────────────────────────────────────
 
-function Perforation() {
+function StepHeader({ step, total, onBack }) {
   return (
-    <div style={{ display: 'flex', overflow: 'hidden', height: 20 }}>
-      {Array.from({ length: 48 }).map((_, i) => (
-        <div key={i} style={{ width: 16, height: 16, borderRadius: '50%', flexShrink: 0, background: '#92400e', margin: -2 }} />
-      ))}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+      {onBack && (
+        <button onClick={onBack} style={{
+          width: 40, height: 40, borderRadius: '50%', border: 'none',
+          background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 20,
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0, WebkitTapHighlightColor: 'transparent',
+        }} aria-label="Go back">‹</button>
+      )}
+      <div style={{ flex: 1, display: 'flex', gap: 6 }}>
+        {Array.from({ length: total }).map((_, i) => (
+          <div key={i} style={{
+            height: 4, flex: 1, borderRadius: 2,
+            background: i <= step ? '#DC2626' : 'rgba(255,255,255,0.25)',
+            transition: 'background 0.3s',
+          }} />
+        ))}
+      </div>
     </div>
   )
 }
 
-function Divider({ solid = false }) {
-  return <div style={{ borderTop: `1px ${solid ? 'solid' : 'dashed'} #a8a29e`, margin: '14px 0' }} />
+// ─── STEP 0 — mode ───────────────────────────────────────────────────────────
+
+function StepMode({ mode, setMode, currency, setCurrency, onNext }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ color: '#fff', marginBottom: 4 }}>
+        <div style={{ fontSize: 40, lineHeight: 1 }}>🍽️</div>
+        <h1 style={{ margin: '10px 0 6px', fontSize: 28, fontWeight: 900, letterSpacing: '-0.5px' }}>Who pays?</h1>
+        <p style={{ margin: 0, fontSize: 15, opacity: 0.7 }}>Just ate out? Let us settle the bill.</p>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {MODES.map(m => (
+          <button key={m.key} onClick={() => { setMode(m.key); buzz(8) }} style={{
+            ...card,
+            display: 'flex', alignItems: 'center', gap: 16, padding: '16px 18px',
+            border: mode === m.key ? '2.5px solid #DC2626' : '2.5px solid transparent',
+            background: mode === m.key ? '#FEF2F2' : '#fff',
+            cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+            transition: 'all 0.15s', WebkitTapHighlightColor: 'transparent',
+          }} aria-pressed={mode === m.key}>
+            <span style={{ fontSize: 34, lineHeight: 1, flexShrink: 0 }}>{m.emoji}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: '#111', marginBottom: 3 }}>{m.title}</div>
+              <div style={{ fontSize: 13, color: '#6B7280', lineHeight: 1.4 }}>{m.desc}</div>
+            </div>
+            <div style={{
+              width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+              background: mode === m.key ? '#DC2626' : '#F3F4F6',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#fff', fontSize: 14, fontWeight: 900, transition: 'all 0.15s',
+            }}>
+              {mode === m.key ? '✓' : ''}
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* currency */}
+      <div style={{ ...card, padding: '14px 16px' }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Currency</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {CURRENCIES.map(c => (
+            <button key={c.code} onClick={() => { setCurrency(c.code); buzz(6) }} style={{
+              flex: 1, padding: '10px 4px', borderRadius: 10, fontFamily: 'inherit',
+              fontSize: 14, fontWeight: 700, cursor: 'pointer',
+              border: currency === c.code ? '2px solid #DC2626' : '1.5px solid #E5E7EB',
+              background: currency === c.code ? '#FEF2F2' : '#fff',
+              color: currency === c.code ? '#DC2626' : '#374151',
+            }} aria-pressed={currency === c.code}>
+              {c.symbol} {c.code}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <button onClick={onNext} style={primaryBtn}>Next: Add People →</button>
+    </div>
+  )
 }
 
-// ─── member row ───────────────────────────────────────────────────────────────
+// ─── avatar chip ─────────────────────────────────────────────────────────────
 
-function MemberRow({ member, index, onNameChange, onRemove, canRemove, pickCount, odds, fairMode }) {
+function AvatarChip({ member, index, editing, onEdit, onNameChange, onDone, onRemove, canRemove, timesChosen }) {
+  const inputRef = useRef(null)
+  const display = member.name.trim() || `Person ${index + 1}`
+  const initial = member.name.trim() ? member.name.trim()[0].toUpperCase() : (index + 1).toString()
+  const bg = AVATAR_BG[index % AVATAR_BG.length]
+
+  useEffect(() => { if (editing) inputRef.current?.focus() }, [editing])
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-      <span style={{ color: '#78716c', fontSize: 13, width: 20, textAlign: 'right', flexShrink: 0 }}>
-        {index + 1}.
-      </span>
-      <input
-        type="text"
-        value={member.name}
-        onChange={e => onNameChange(member.id, e.target.value)}
-        placeholder={`Person ${index + 1}`}
-        maxLength={20}
-        style={{
-          flex: 1, background: 'transparent',
-          borderBottom: '1px dashed #a8a29e',
-          color: '#1c1917', fontSize: 16,
-          padding: '6px 4px', fontFamily: 'inherit',
-          textTransform: 'uppercase', letterSpacing: '0.04em',
-          outline: 'none', minWidth: 0,
-        }}
-        onFocus={e => { e.target.style.borderBottomColor = '#1c1917' }}
-        onBlur={e => { e.target.style.borderBottomColor = '#a8a29e' }}
-        aria-label={`Name for person ${index + 1}`}
-      />
-      {fairMode && odds != null && (
-        <span style={{ color: '#a8a29e', fontSize: 11, flexShrink: 0, minWidth: 30, textAlign: 'right' }}
-          title="Chance of being picked">
-          {odds}%
-        </span>
-      )}
-      {!fairMode && pickCount > 0 && (
-        <span style={{ color: '#78716c', fontSize: 12, flexShrink: 0 }} title="Times picked">
-          ×{pickCount}
-        </span>
-      )}
-      {canRemove && (
-        <button
-          onClick={() => onRemove(member.id)}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, position: 'relative' }}>
+      {/* avatar circle */}
+      <button onClick={() => { onEdit(); buzz(6) }} style={{
+        width: 64, height: 64, borderRadius: '50%', border: editing ? '3px solid #DC2626' : '3px solid transparent',
+        background: bg, color: '#fff', fontSize: 24, fontWeight: 900,
+        cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
+        boxShadow: '0 3px 10px rgba(0,0,0,0.18)', WebkitTapHighlightColor: 'transparent',
+        transition: 'transform 0.15s', position: 'relative',
+      }}
+        onTouchStart={e => { e.currentTarget.style.transform = 'scale(0.92)' }}
+        onTouchEnd={e => { e.currentTarget.style.transform = 'scale(1)' }}
+        aria-label={`Edit name for ${display}`}
+      >
+        {initial}
+        {timesChosen > 0 && (
+          <span style={{
+            position: 'absolute', top: -4, right: -4,
+            background: '#DC2626', color: '#fff', borderRadius: '50%',
+            width: 18, height: 18, fontSize: 10, fontWeight: 800,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '2px solid #F9FAFB',
+          }}>{timesChosen}</span>
+        )}
+      </button>
+
+      {/* name / input */}
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={member.name}
+          onChange={e => onNameChange(e.target.value)}
+          onBlur={onDone}
+          onKeyDown={e => e.key === 'Enter' && onDone()}
+          placeholder={`Person ${index + 1}`}
+          maxLength={12}
           style={{
-            color: '#a8a29e', fontSize: 16, width: 36, height: 36, flexShrink: 0,
-            background: 'none', border: 'none', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, padding: 0,
+            width: 72, textAlign: 'center', fontSize: 13, fontFamily: 'inherit',
+            border: '2px solid #DC2626', borderRadius: 8, padding: '4px 2px',
+            outline: 'none', color: '#111',
           }}
-          aria-label={`Remove ${member.name || `person ${index + 1}`}`}
-        >
-          ✕
-        </button>
+          aria-label={`Name for person ${index + 1}`}
+        />
+      ) : (
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center' }}>
+          {display}
+        </span>
+      )}
+
+      {/* remove */}
+      {canRemove && !editing && (
+        <button onClick={() => { onRemove(); buzz(8) }} style={{
+          fontSize: 11, color: '#9CA3AF', background: 'none', border: 'none',
+          cursor: 'pointer', padding: '2px 4px', fontFamily: 'inherit',
+        }} aria-label={`Remove ${display}`}>remove</button>
       )}
     </div>
   )
 }
 
-// ─── stamp ────────────────────────────────────────────────────────────────────
+// ─── STEP 1 — people ─────────────────────────────────────────────────────────
 
-function Stamp({ winnerName, mode }) {
-  const line2 =
-    mode === 'one-pays' ? 'PAYS THE BILL!'
-    : mode === 'loser-tip' ? 'PAYS THE TIP!'
-    : 'ALL SPLIT!'
+function StepPeople({ members, setMembers, fairMode, setFairMode, history, onBack, onNext }) {
+  const [editingId, setEditingId] = useState(null)
+
+  const addPerson = () => {
+    if (members.length >= 10) return
+    const m = newMember(); setMembers(ms => [...ms, m]); setEditingId(m.id); buzz(8)
+  }
+  const removePerson = id => { if (members.length > 2) { setMembers(ms => ms.filter(m => m.id !== id)); buzz(8) } }
+  const setSize = n => {
+    n = Math.max(2, Math.min(10, n))
+    setMembers(ms => n > ms.length
+      ? [...ms, ...Array.from({ length: n - ms.length }, newMember)]
+      : ms.slice(0, n))
+    buzz(8)
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ color: '#fff' }}>
+        <h2 style={{ margin: '0 0 4px', fontSize: 24, fontWeight: 900 }}>Who's at the table?</h2>
+        <p style={{ margin: 0, fontSize: 14, opacity: 0.7 }}>Add everyone in your group</p>
+      </div>
+
+      {/* stepper */}
+      <div style={{ ...card, padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
+        <button onClick={() => setSize(members.length - 1)} disabled={members.length <= 2} style={{
+          width: 52, height: 52, borderRadius: '50%', border: 'none',
+          background: members.length > 2 ? '#111' : '#F3F4F6',
+          color: members.length > 2 ? '#fff' : '#D1D5DB',
+          fontSize: 28, fontWeight: 900, cursor: members.length > 2 ? 'pointer' : 'not-allowed',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          WebkitTapHighlightColor: 'transparent',
+        }} aria-label="Fewer people">−</button>
+        <div style={{ textAlign: 'center', minWidth: 70 }}>
+          <div style={{ fontSize: 46, fontWeight: 900, color: '#111', lineHeight: 1 }}>{members.length}</div>
+          <div style={{ fontSize: 13, color: '#9CA3AF', fontWeight: 600 }}>people</div>
+        </div>
+        <button onClick={() => setSize(members.length + 1)} disabled={members.length >= 10} style={{
+          width: 52, height: 52, borderRadius: '50%', border: 'none',
+          background: members.length < 10 ? '#111' : '#F3F4F6',
+          color: members.length < 10 ? '#fff' : '#D1D5DB',
+          fontSize: 28, fontWeight: 900, cursor: members.length < 10 ? 'pointer' : 'not-allowed',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          WebkitTapHighlightColor: 'transparent',
+        }} aria-label="More people">+</button>
+      </div>
+
+      {/* avatars */}
+      <div style={{ ...card, padding: '20px 16px' }}>
+        <div style={{ fontSize: 12, color: '#9CA3AF', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16 }}>
+          Tap an avatar to name them
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: 16 }}>
+          {members.map((m, i) => (
+            <AvatarChip
+              key={m.id}
+              member={m}
+              index={i}
+              editing={editingId === m.id}
+              onEdit={() => setEditingId(m.id)}
+              onNameChange={name => setMembers(ms => ms.map(x => x.id === m.id ? { ...x, name } : x))}
+              onDone={() => setEditingId(null)}
+              onRemove={() => removePerson(m.id)}
+              canRemove={members.length > 2}
+              timesChosen={history[m.id] ?? 0}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* fair mode toggle */}
+      <label style={{
+        ...card, padding: '14px 18px',
+        display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer',
+        border: fairMode ? '2px solid #DC2626' : '2px solid transparent',
+      }}>
+        {/* iOS-style toggle */}
+        <div style={{
+          width: 48, height: 28, borderRadius: 14, flexShrink: 0, position: 'relative',
+          background: fairMode ? '#DC2626' : '#D1D5DB', transition: 'background 0.2s',
+        }}>
+          <div style={{
+            position: 'absolute', top: 3, left: fairMode ? 23 : 3,
+            width: 22, height: 22, borderRadius: '50%', background: '#fff',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.25)', transition: 'left 0.2s',
+          }} />
+          <input type="checkbox" checked={fairMode}
+            onChange={e => { setFairMode(e.target.checked); buzz(8) }}
+            style={{ position: 'absolute', opacity: 0, inset: 0, cursor: 'pointer', margin: 0 }} />
+        </div>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 15, color: '#111' }}>Fair Mode</div>
+          <div style={{ fontSize: 13, color: '#6B7280', marginTop: 2 }}>
+            Lowers the odds for people who've already paid this trip
+          </div>
+        </div>
+      </label>
+
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button onClick={onBack} style={ghostBtn}>← Back</button>
+        <button onClick={onNext} style={{ ...primaryBtn, flex: 1 }}>Next →</button>
+      </div>
+    </div>
+  )
+}
+
+// ─── STEP 2 — bill + decide ───────────────────────────────────────────────────
+
+function StepDecide({ mode, members, currency, billAmount, setBillAmount, tipValue, setTipValue, tipType, setTipType, onBack, onStamp, spinning }) {
+  const sym = CURRENCIES.find(c => c.code === currency)?.symbol ?? '$'
+  const bill = parseFloat(billAmount) || 0
+  const tipNum = parseFloat(tipValue) || 0
+  const tipAmt = mode === 'loser-tip' ? (tipType === 'pct' ? (bill * tipNum / 100) : tipNum) : 0
+  const perPerson = bill > 0 ? bill / members.length : 0
+  const needsBill = mode !== 'one-pays'
+  const canStamp = !spinning && (!needsBill || (bill > 0 && (mode !== 'loser-tip' || tipAmt > 0)))
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ color: '#fff' }}>
+        <h2 style={{ margin: '0 0 4px', fontSize: 24, fontWeight: 900 }}>
+          {needsBill ? "What's the total?" : 'Ready to decide!'}
+        </h2>
+        <p style={{ margin: 0, fontSize: 14, opacity: 0.7 }}>
+          {needsBill ? `Tap the bill total from the restaurant` : `Everyone's here — time to find out who pays.`}
+        </p>
+      </div>
+
+      {/* Bill input */}
+      {needsBill && (
+        <div style={{ ...card, padding: '20px', background: '#111' }}>
+          <div style={{ fontSize: 12, color: '#6B7280', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
+            Bill Total
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 36, fontWeight: 800, color: '#6B7280' }}>{sym}</span>
+            <input
+              type="number" inputMode="decimal" min="0" step="0.01"
+              value={billAmount} onChange={e => setBillAmount(e.target.value)}
+              placeholder="0.00"
+              style={{
+                flex: 1, background: 'transparent', border: 'none', outline: 'none',
+                fontSize: 56, fontWeight: 900, color: '#fff', fontFamily: 'inherit',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+              aria-label="Total bill amount"
+            />
+          </div>
+          {bill > 0 && (
+            <div style={{ fontSize: 14, color: '#6B7280', marginTop: 8, borderTop: '1px solid #222', paddingTop: 10 }}>
+              {sym}{perPerson.toFixed(2)} each &nbsp;·&nbsp; {members.length} people
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tip (loser-tip only) */}
+      {mode === 'loser-tip' && (
+        <div style={{ ...card, padding: '18px' }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: '#111', marginBottom: 12 }}>
+            💸 Tip — one random person pays this
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            {TIP_PRESETS.map(p => (
+              <button key={p} onClick={() => { setTipType('pct'); setTipValue(String(p)); buzz(6) }} style={{
+                flex: 1, padding: '10px 2px', borderRadius: 10, fontFamily: 'inherit',
+                fontSize: 14, fontWeight: 700, cursor: 'pointer', minHeight: 44,
+                border: tipType === 'pct' && String(p) === tipValue ? '2px solid #DC2626' : '1.5px solid #E5E7EB',
+                background: tipType === 'pct' && String(p) === tipValue ? '#FEF2F2' : '#fff',
+                color: tipType === 'pct' && String(p) === tipValue ? '#DC2626' : '#374151',
+              }}>{p}%</button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => { setTipType(t => t === 'pct' ? 'amt' : 'pct'); setTipValue('') }} style={{
+              padding: '0 16px', height: 46, borderRadius: 10, fontFamily: 'inherit',
+              fontSize: 15, fontWeight: 700, cursor: 'pointer', border: '1.5px solid #E5E7EB',
+              background: '#fff', color: '#374151', flexShrink: 0,
+            }}>{tipType === 'pct' ? '%' : sym}</button>
+            <input type="number" inputMode="decimal" min="0"
+              step={tipType === 'pct' ? '1' : '0.01'}
+              value={tipValue} onChange={e => setTipValue(e.target.value)}
+              placeholder={tipType === 'pct' ? '18' : '0.00'}
+              style={{
+                flex: 1, padding: '0 14px', height: 46, borderRadius: 10, fontSize: 16,
+                border: '1.5px solid #E5E7EB', outline: 'none', fontFamily: 'inherit', color: '#111',
+              }} aria-label="Tip value" />
+          </div>
+          {bill > 0 && tipAmt > 0 && (
+            <div style={{ marginTop: 10, padding: '10px 12px', background: '#FEF2F2', borderRadius: 10, fontSize: 14, color: '#DC2626', fontWeight: 600 }}>
+              Tip = {fmt(tipAmt, currency)} · one person draws this short straw 🥲
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* summary for split mode */}
+      {mode === 'split' && bill > 0 && (
+        <div style={{ ...card, padding: '16px 18px', background: '#F0FDF4', border: '1.5px solid #BBF7D0' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#166534', marginBottom: 6 }}>📊 Everyone pays</div>
+          <div style={{ fontSize: 22, fontWeight: 900, color: '#15803D' }}>{fmt(perPerson, currency)} each</div>
+        </div>
+      )}
+
+      {/* hint */}
+      {needsBill && bill <= 0 && (
+        <div style={{ textAlign: 'center', fontSize: 14, color: 'rgba(255,255,255,0.6)' }}>
+          ⬆ Enter the bill total to continue
+        </div>
+      )}
+      {mode === 'loser-tip' && bill > 0 && tipAmt <= 0 && (
+        <div style={{ textAlign: 'center', fontSize: 14, color: 'rgba(255,255,255,0.6)' }}>
+          ⬆ Set a tip amount to continue
+        </div>
+      )}
+
+      {/* stamp button */}
+      <button
+        onClick={() => { if (canStamp) { buzz(20); onStamp() } }}
+        style={{
+          ...primaryBtn,
+          fontSize: 20, padding: '20px 24px', borderRadius: 18,
+          opacity: canStamp ? 1 : 0.4,
+          cursor: canStamp ? 'pointer' : 'not-allowed',
+          animation: canStamp && !spinning ? 'ready-pulse 2s ease-in-out infinite' : 'none',
+          marginTop: 4,
+        }}
+        onTouchStart={e => { if (canStamp) e.currentTarget.style.transform = 'scale(0.96)' }}
+        onTouchEnd={e => { e.currentTarget.style.transform = 'scale(1)' }}
+        aria-label="Stamp to decide who pays"
+      >
+        {spinning ? '⏳ Deciding…' : '🔖 STAMP IT!'}
+      </button>
+
+      <button onClick={onBack} style={{ ...ghostBtn, width: '100%', textAlign: 'center', borderColor: 'rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.7)', background: 'transparent' }}>← Back</button>
+    </div>
+  )
+}
+
+// ─── result overlay ───────────────────────────────────────────────────────────
+
+function ResultOverlay({ phase, spinName, result, members, mode, bill, tipAmt, currency, fairMode, history, onAgain, onReset, onClose, reducedMotion }) {
+  const displayName = m => {
+    const idx = members.findIndex(x => x.id === m.id)
+    return (m.name.trim() || `Person ${idx + 1}`).toUpperCase()
+  }
+  const sym = CURRENCIES.find(c => c.code === currency)?.symbol ?? '$'
+
+  const shareResult = async () => {
+    if (!result) return
+    const w = displayName(result.winner)
+    let text = `🧾 WHO PAYS?\n${'─'.repeat(24)}\n`
+    if (mode === 'one-pays') text += `👉 ${w} PAYS THE WHOLE BILL!\n`
+    else if (mode === 'loser-tip') {
+      text += `💸 ${w} PAYS THE TIP!\n\n`
+      members.forEach((m, i) => {
+        const share = result.shares[i] + (result.tipPayerIdx === i ? result.tipAmount : 0)
+        text += `  ${displayName(m)}: ${fmt(share, currency)}\n`
+      })
+    } else {
+      text += `✂️ EVERYONE SPLITS!\n\n`
+      members.forEach((m, i) => text += `  ${displayName(m)}: ${fmt(result.shares[i], currency)}\n`)
+    }
+    if (result.grandTotal > 0) text += `${'─'.repeat(24)}\nTotal: ${fmt(result.grandTotal, currency)}`
+    try {
+      if (navigator.share) await navigator.share({ title: 'Who Pays?', text })
+      else if (navigator.clipboard) { await navigator.clipboard.writeText(text); /* toast handled outside */ }
+    } catch { }
+  }
+
+  if (!phase) return null
 
   return (
     <div style={{
-      display: 'inline-block', border: '3px solid #dc2626', borderRadius: 4,
-      padding: '10px 24px', transform: 'rotate(-6deg)',
-      boxShadow: '0 0 0 1px #dc2626 inset, 2px 4px 14px rgba(220,38,38,0.3)',
-      userSelect: 'none', animation: 'stamp-in 0.4s cubic-bezier(.2,1.4,.4,1)',
+      position: 'fixed', inset: 0, zIndex: 100,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end',
     }}>
-      <div style={{ color: '#dc2626', fontWeight: 900, textTransform: 'uppercase', textAlign: 'center', lineHeight: 1.2, letterSpacing: '0.08em' }}>
-        <div style={{ fontSize: 28 }}>{winnerName}</div>
-        <div style={{ fontSize: 12, borderTop: '2px solid #dc2626', marginTop: 5, paddingTop: 5 }}>{line2}</div>
-      </div>
-    </div>
-  )
-}
+      {/* backdrop */}
+      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.92)' }} />
 
-// ─── split table ──────────────────────────────────────────────────────────────
-
-function SplitTable({ members, shares, tipPayerIdx, tipAmount, displayName, currency }) {
-  return (
-    <div style={{ marginTop: 8 }}>
-      {members.map((m, i) => (
-        <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 0' }}>
-          <span style={{ fontSize: 14, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#44403c' }}>
-            {displayName(m)}
-            {tipPayerIdx === i && <span style={{ marginLeft: 6, color: '#dc2626', fontSize: 12 }}>(+TIP)</span>}
-          </span>
-          <span style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: tipPayerIdx === i ? '#dc2626' : '#1c1917' }}>
-            {fmt(shares[i] + (tipPayerIdx === i ? tipAmount : 0), currency)}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ─── tally bars ───────────────────────────────────────────────────────────────
-
-function TallyBars({ members, history, displayName }) {
-  const max = Math.max(...members.map(m => history[m.id] ?? 0), 1)
-  const hasTally = members.some(m => (history[m.id] ?? 0) > 0)
-  if (!hasTally) return null
-  return (
-    <>
-      <Divider />
-      <div style={{ fontSize: 11, color: '#a8a29e', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
-        Who's Paid So Far
-      </div>
-      {members.map(m => {
-        const count = history[m.id] ?? 0
-        if (count === 0) return null
-        return (
-          <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <span style={{ fontSize: 12, textTransform: 'uppercase', color: '#78716c', width: 90, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {displayName(m)}
-            </span>
-            <div style={{ flex: 1, background: '#e7e5e4', borderRadius: 999, height: 7, overflow: 'hidden' }}>
-              <div style={{ width: `${(count / max) * 100}%`, height: '100%', background: '#dc2626', borderRadius: 999, transition: 'width 0.5s ease' }} />
-            </div>
-            <span style={{ fontSize: 12, color: '#78716c', width: 18, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
-              {count}
-            </span>
+      {/* spinning phase */}
+      {phase === 'spinning' && (
+        <div style={{
+          position: 'relative', zIndex: 1, textAlign: 'center', padding: '0 24px',
+          width: '100%', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20,
+        }}>
+          <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.5)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            🎲 Picking someone…
           </div>
-        )
-      })}
-    </>
+          <div aria-live="polite" aria-atomic="true" style={{
+            fontSize: 64, fontWeight: 900, color: '#fff', letterSpacing: '0.04em',
+            textTransform: 'uppercase', lineHeight: 1.1,
+            animation: 'spin-name 0.3s ease-in-out infinite alternate',
+            textShadow: '0 0 30px rgba(220,38,38,0.5)',
+          }}>
+            {spinName}
+          </div>
+        </div>
+      )}
+
+      {/* result phase — bottom sheet */}
+      {phase === 'result' && result && (
+        <>
+          <div style={{ position: 'relative', zIndex: 1, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ fontSize: 56, animation: reducedMotion ? 'none' : 'winner-emoji 0.6s ease' }}>🎉</div>
+          </div>
+          <div style={{
+            position: 'relative', zIndex: 1, width: '100%', maxHeight: '80vh',
+            background: '#FFFBF5', borderRadius: '28px 28px 0 0',
+            overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+            animation: reducedMotion ? 'none' : 'slide-up 0.45s cubic-bezier(.2,1,.4,1)',
+          }}>
+            {/* drag handle */}
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '14px 0 4px' }}>
+              <div style={{ width: 40, height: 4, borderRadius: 2, background: '#D1D5DB' }} />
+            </div>
+
+            <div style={{ padding: '8px 24px 40px', fontFamily: "'Courier New', Courier, monospace" }}>
+              {/* receipt header */}
+              <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: '#9CA3AF', letterSpacing: '0.2em' }}>✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦</div>
+                <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: '0.15em', color: '#111', margin: '6px 0 2px' }}>THE VERDICT</div>
+                <div style={{ fontSize: 11, color: '#9CA3AF', letterSpacing: '0.2em' }}>✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦</div>
+                <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 6 }}>{result.timestamp}</div>
+              </div>
+
+              {/* THE STAMP */}
+              <div style={{ display: 'flex', justifyContent: 'center', margin: '20px 0' }}>
+                <div style={{
+                  display: 'inline-block', border: '3px solid #DC2626', borderRadius: 4,
+                  padding: '10px 28px', transform: 'rotate(-5deg)',
+                  boxShadow: '0 0 0 1px #DC2626 inset, 3px 5px 16px rgba(220,38,38,0.3)',
+                  userSelect: 'none',
+                  animation: reducedMotion ? 'none' : 'stamp-in 0.5s cubic-bezier(.2,1.4,.4,1)',
+                }}>
+                  <div style={{ color: '#DC2626', fontWeight: 900, textTransform: 'uppercase', textAlign: 'center', lineHeight: 1.2, letterSpacing: '0.08em' }}>
+                    <div style={{ fontSize: 26 }}>{displayName(result.winner)}</div>
+                    <div style={{ fontSize: 11, borderTop: '2px solid #DC2626', marginTop: 5, paddingTop: 5 }}>
+                      {mode === 'one-pays' ? 'PAYS THE BILL!' : mode === 'loser-tip' ? 'PAYS THE TIP!' : 'ALL SPLIT!'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* breakdown */}
+              {(mode === 'split' || mode === 'loser-tip') && bill > 0 && (
+                <>
+                  <div style={{ borderTop: '1px dashed #D1D5DB', borderBottom: '1px dashed #D1D5DB', padding: '12px 0', margin: '4px 0 12px' }}>
+                    {members.map((m, i) => (
+                      <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 14 }}>
+                        <span style={{ textTransform: 'uppercase', letterSpacing: '0.04em', color: '#374151' }}>
+                          {displayName(m)}
+                          {result.tipPayerIdx === i && <span style={{ color: '#DC2626', fontSize: 12, marginLeft: 6 }}>+TIP</span>}
+                        </span>
+                        <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: result.tipPayerIdx === i ? '#DC2626' : '#111' }}>
+                          {fmt(result.shares[i] + (result.tipPayerIdx === i ? result.tipAmount : 0), currency)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: 16, marginBottom: 16 }}>
+                    <span>TOTAL</span>
+                    <span style={{ color: '#DC2626', fontVariantNumeric: 'tabular-nums' }}>{fmt(result.grandTotal, currency)}</span>
+                  </div>
+                </>
+              )}
+
+              {mode === 'one-pays' && (
+                <div style={{ textAlign: 'center', fontSize: 13, color: '#6B7280', marginBottom: 16 }}>
+                  Better luck next time everyone else! 😅
+                </div>
+              )}
+
+              {/* tally */}
+              {members.some(m => (history[m.id] ?? 0) > 0) && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
+                    Trip tally
+                  </div>
+                  {members.map((m, i) => {
+                    const c = history[m.id] ?? 0; if (!c) return null
+                    const max = Math.max(...members.map(x => history[x.id] ?? 0), 1)
+                    return (
+                      <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                        <span style={{ fontSize: 12, color: '#6B7280', width: 80, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'uppercase' }}>
+                          {displayName(m)}
+                        </span>
+                        <div style={{ flex: 1, background: '#E5E7EB', borderRadius: 999, height: 6, overflow: 'hidden' }}>
+                          <div style={{ width: `${(c / max) * 100}%`, height: '100%', background: '#DC2626', borderRadius: 999, transition: 'width 0.5s ease' }} />
+                        </div>
+                        <span style={{ fontSize: 12, color: '#6B7280', width: 16, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{c}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              <div style={{ fontSize: 11, color: '#9CA3AF', textAlign: 'center', marginBottom: 20, letterSpacing: '0.15em' }}>✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦</div>
+
+              {/* actions */}
+              <button onClick={shareResult} style={{
+                ...primaryBtn, marginBottom: 10, fontSize: 16,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}>
+                📲 Share with the Group
+              </button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={onAgain} style={{ ...ghostBtn, flex: 1, textAlign: 'center' }}>↺ Roll Again</button>
+                <button onClick={onReset} style={{ ...ghostBtn, flex: 1, textAlign: 'center' }}>✕ Reset Tally</button>
+              </div>
+              <button onClick={onClose} style={{ ...ghostBtn, width: '100%', marginTop: 10, textAlign: 'center', color: '#9CA3AF', borderColor: '#E5E7EB' }}>
+                Done
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
-// ─── main ─────────────────────────────────────────────────────────────────────
-
-let nextId = 1
-function makeId() { return nextId++ }
-function makeMember() { return { id: makeId(), name: '' } }
-
-const MODES = [
-  { key: 'one-pays',  label: '🎯 One Pays',   desc: 'One person covers the whole bill.' },
-  { key: 'split',     label: '✂️ Split',       desc: 'Everyone splits the bill equally.' },
-  { key: 'loser-tip', label: '💸 Loser Tips',  desc: 'Split bill evenly, one person pays the tip.' },
-]
-const TIP_PRESETS = [10, 15, 18, 20, 25]
+// ─── main app ─────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [members, setMembers] = useState(() => [makeMember(), makeMember(), makeMember()])
+  const [step, setStep] = useState(0)
   const [mode, setMode] = useState('one-pays')
+  const [members, setMembers] = useState(() => [newMember(), newMember(), newMember()])
   const [billAmount, setBillAmount] = useState('')
   const [tipValue, setTipValue] = useState('')
   const [tipType, setTipType] = useState('pct')
-  const [splitTip, setSplitTip] = useState(false)        // in Split mode: include tip evenly
-  const [splitTipValue, setSplitTipValue] = useState('') // tip % for split-with-tip
-  const [roundUp, setRoundUp] = useState(false)          // round each share up to nearest $
   const [fairMode, setFairMode] = useState(false)
   const [currency, setCurrency] = useState('USD')
   const [history, setHistory] = useState({})
 
-  const [phase, setPhase] = useState('idle')  // idle | spinning | done
+  const [overlayPhase, setOverlayPhase] = useState(null)  // null | spinning | result
   const [spinName, setSpinName] = useState('')
   const [result, setResult] = useState(null)
   const [confetti, setConfetti] = useState(false)
@@ -310,101 +721,79 @@ export default function App() {
   const spinTimer = useRef(null)
   const confettiTimer = useRef(null)
   const toastTimer = useRef(null)
-  const resultRef = useRef(null)
 
-  const displayName = useCallback(
-    m => (m.name.trim() ? m.name.trim().toUpperCase() : `PERSON ${members.indexOf(m) + 1}`),
-    [members]
-  )
+  const displayNameOf = m => {
+    const idx = members.findIndex(x => x.id === m.id)
+    return m.name.trim() || `Person ${idx + 1}`
+  }
 
   const showToast = msg => {
-    setToast(msg)
-    clearTimeout(toastTimer.current)
+    setToast(msg); clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setToast(''), 2400)
   }
 
-  const addMember = () => { if (members.length < 10) { setMembers(ms => [...ms, makeMember()]); buzz(8) } }
-  const removeMember = id => { if (members.length > 2) { setMembers(ms => ms.filter(m => m.id !== id)); buzz(8) } }
-  const updateName = (id, name) => setMembers(ms => ms.map(m => m.id === id ? { ...m, name } : m))
+  const totalSteps = mode === 'one-pays' ? 2 : 3
 
-  const setPartySize = n => {
-    n = Math.max(2, Math.min(10, n))
-    setMembers(ms => {
-      if (n === ms.length) return ms
-      if (n > ms.length) return [...ms, ...Array.from({ length: n - ms.length }, makeMember)]
-      return ms.slice(0, n)
-    })
-    buzz(8)
+  const goNext = () => {
+    if (step === 0) { setStep(1); return }
+    if (step === 1 && mode === 'one-pays') { doStamp(); return }
+    if (step === 1) { setStep(2); return }
   }
 
-  const computeTip = useCallback(() => {
-    const bill = parseFloat(billAmount) || 0
-    const val = parseFloat(tipValue) || 0
-    return tipType === 'pct' ? (bill * val) / 100 : val
-  }, [billAmount, tipValue, tipType])
+  const goBack = () => {
+    if (step > 0) setStep(s => s - 1)
+  }
 
-  const computeSplitTip = useCallback(() => {
-    const bill = parseFloat(billAmount) || 0
-    const pct = parseFloat(splitTipValue) || 0
-    return (bill * pct) / 100
-  }, [billAmount, splitTipValue])
-
-  const finalise = useCallback((winner) => {
+  const finalise = winner => {
     const bill = parseFloat(billAmount) || 0
     const n = members.length
     let shares = Array(n).fill(0)
     let tipPayerIdx = null
     let tipAmount = 0
 
-    if (mode === 'split') {
-      const total = splitTip ? bill + computeSplitTip() : bill
-      shares = splitEvenly(total, n)
-      if (roundUp) shares = roundUp(shares)
-    }
+    if (mode === 'split') shares = splitEvenly(bill, n)
     if (mode === 'loser-tip') {
       shares = splitEvenly(bill, n)
-      if (roundUp) shares = roundUp(shares)
-      tipAmount = computeTip()
+      const tipNum = parseFloat(tipValue) || 0
+      tipAmount = tipType === 'pct' ? (bill * tipNum / 100) : tipNum
       tipPayerIdx = members.findIndex(m => m.id === winner.id)
     }
 
+    const grandTotal = bill + tipAmount
+
     setHistory(h => ({ ...h, [winner.id]: (h[winner.id] ?? 0) + 1 }))
-    setResult({ winner, shares, tipPayerIdx, tipAmount, timestamp: nowString(), mode })
-    setPhase('done')
+    setResult({ winner, shares, tipPayerIdx, tipAmount, grandTotal, timestamp: nowString(), mode })
+    setOverlayPhase('result')
     buzz([0, 60, 40, 120])
 
     if (!reducedMotion) {
       setConfetti(true)
       clearTimeout(confettiTimer.current)
-      confettiTimer.current = setTimeout(() => setConfetti(false), 3200)
+      confettiTimer.current = setTimeout(() => setConfetti(false), 3500)
     }
-    setTimeout(() => resultRef.current?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' }), 100)
-  }, [billAmount, members, mode, computeTip, computeSplitTip, splitTip, roundUp, reducedMotion])
+  }
 
-  const stamp = () => {
-    if (phase === 'spinning') return
-    buzz(15)
+  const doStamp = () => {
     const winner = pickWeighted(members, history, fairMode)
-    if (reducedMotion) { finalise(winner); return }
+    if (reducedMotion) { setOverlayPhase('spinning'); setTimeout(() => finalise(winner), 50); return }
 
-    setPhase('spinning')
-    setResult(null)
-    setConfetti(false)
+    setOverlayPhase('spinning')
+    setSpinName(displayNameOf(members[0]))
 
     let elapsed = 0
-    const duration = 2400
+    const duration = 2600
     let interval = 70
 
     const spin = () => {
       const idx = Math.floor(Math.random() * members.length)
-      setSpinName(displayName(members[idx]))
+      setSpinName(displayNameOf(members[idx]).toUpperCase())
       buzz(4)
       elapsed += interval
-      interval = 70 + (elapsed / duration) ** 2 * 520
+      interval = 70 + (elapsed / duration) ** 2 * 560
       if (elapsed >= duration) {
         clearTimeout(spinTimer.current)
-        setSpinName(displayName(winner))
-        setTimeout(() => finalise(winner), 350)
+        setSpinName(displayNameOf(winner).toUpperCase())
+        setTimeout(() => finalise(winner), 400)
         return
       }
       spinTimer.current = setTimeout(spin, interval)
@@ -412,511 +801,140 @@ export default function App() {
     spinTimer.current = setTimeout(spin, interval)
   }
 
-  const again = () => { setPhase('idle'); setResult(null); setSpinName(''); setConfetti(false) }
-  const reset = () => { again(); setHistory({}); showToast('Tally cleared 🧼') }
-
-  const shareResult = async () => {
-    if (!result) return
-    const winner = displayName(result.winner)
-    const sym = CURRENCIES.find(c => c.code === currency)?.symbol ?? '$'
-    let text = `🧾 WHO PAYS THE BILL?\n${'─'.repeat(28)}\n`
-
-    if (result.mode === 'one-pays') {
-      text += `👉 ${winner} PAYS THE WHOLE BILL! 🎯\n`
-    } else if (result.mode === 'loser-tip') {
-      text += `💸 ${winner} GOT THE TIP!\n\n`
-      members.forEach((m, i) => {
-        const share = result.shares[i] + (result.tipPayerIdx === i ? result.tipAmount : 0)
-        text += `  ${displayName(m)}: ${fmt(share, currency)}\n`
-      })
-      text += `${'─'.repeat(28)}\nTotal: ${fmt(grandTotal, currency)}\n`
-    } else {
-      text += `✂️ EVERYONE SPLITS EVENLY!\n\n`
-      members.forEach((m, i) => {
-        text += `  ${displayName(m)}: ${fmt(result.shares[i], currency)}\n`
-      })
-      text += `${'─'.repeat(28)}\nTotal: ${fmt(bill, currency)}\n`
-    }
-    text += `\n${result.timestamp}`
-
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: 'Who Pays the Bill?', text })
-      } else if (navigator.clipboard) {
-        await navigator.clipboard.writeText(text)
-        showToast('Copied! Paste it in the group chat 📋')
-      } else {
-        showToast('Sharing not supported on this device')
-      }
-    } catch { /* cancelled */ }
+  const handleAgain = () => {
+    setOverlayPhase(null); setResult(null); setSpinName(''); setConfetti(false)
+    setStep(mode === 'one-pays' ? 1 : 2)
+  }
+  const handleReset = () => {
+    setOverlayPhase(null); setResult(null); setSpinName(''); setConfetti(false)
+    setHistory({}); setStep(0); showToast('Tally cleared 🧼')
+  }
+  const handleClose = () => {
+    setOverlayPhase(null); setResult(null); setSpinName(''); setConfetti(false)
+    setStep(0)
   }
 
   useEffect(() => () => {
-    clearTimeout(spinTimer.current)
-    clearTimeout(confettiTimer.current)
-    clearTimeout(toastTimer.current)
+    clearTimeout(spinTimer.current); clearTimeout(confettiTimer.current); clearTimeout(toastTimer.current)
   }, [])
 
   const bill = parseFloat(billAmount) || 0
-  const tipAmt = computeTip()
-  const splitTipAmt = computeSplitTip()
-  const grandTotal = mode === 'loser-tip' ? bill + tipAmt : splitTip ? bill + splitTipAmt : bill
-  const needsBill = mode === 'split' || mode === 'loser-tip'
-  const odds = getOdds(members, history, fairMode)
-
-  const canStamp =
-    phase !== 'spinning' &&
-    members.length >= 2 &&
-    (mode === 'one-pays' ||
-     (mode === 'split' && bill > 0) ||
-     (mode === 'loser-tip' && bill > 0 && parseFloat(tipValue) > 0))
-
-  const hint =
-    phase === 'spinning' ? '' :
-    needsBill && bill <= 0 ? '⬆ Enter the bill total to continue' :
-    mode === 'loser-tip' && bill > 0 && !(parseFloat(tipValue) > 0) ? '⬆ Set the tip to continue' :
-    ''
-
-  const currentMode = MODES.find(m => m.key === mode)
-  const currInfo = CURRENCIES.find(c => c.code === currency)
-
-  // ── shared styles ─────────────────────────────────────────────────────────
-  const paper = {
-    background: '#faf9f7',
-    fontFamily: "'Courier New', Courier, ui-monospace, monospace",
-    color: '#1c1917', fontSize: 14, lineHeight: 1.5,
-  }
-  const labelSt = {
-    fontSize: 11, color: '#a8a29e',
-    textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8,
-  }
-  const inputSt = {
-    background: 'transparent', borderBottom: '1px dashed #a8a29e',
-    color: '#1c1917', fontSize: 16, padding: '6px 4px', fontFamily: 'inherit',
-    outline: 'none', textAlign: 'right', fontVariantNumeric: 'tabular-nums', width: 110,
-  }
-  const stepBtnSt = enabled => ({
-    width: 48, height: 48, borderRadius: 12, flexShrink: 0,
-    fontSize: 26, fontWeight: 900, fontFamily: 'inherit',
-    border: '2px solid', borderColor: enabled ? '#1c1917' : '#d6d3d1',
-    background: enabled ? '#1c1917' : '#f5f5f4',
-    color: enabled ? '#faf9f7' : '#a8a29e',
-    cursor: enabled ? 'pointer' : 'not-allowed',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    lineHeight: 1, padding: 0, transition: 'all 0.12s',
-    WebkitTapHighlightColor: 'transparent',
-  })
-  const actionBtnSt = {
-    flex: 1, padding: '12px 0', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
-    textTransform: 'uppercase', letterSpacing: '0.08em', minHeight: 46,
-    border: '1.5px solid #d6d3d1', borderRadius: 10, background: 'transparent',
-    color: '#57534e', cursor: 'pointer',
-  }
-  const toggleRowSt = {
-    display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
-    fontSize: 13, color: '#57534e', userSelect: 'none',
-    padding: '9px 10px', borderRadius: 8, background: '#f5f5f4', marginBottom: 6,
-  }
+  const tipNum = parseFloat(tipValue) || 0
+  const tipAmt = mode === 'loser-tip' ? (tipType === 'pct' ? (bill * tipNum / 100) : tipNum) : 0
 
   return (
     <div style={{
       minHeight: '100svh',
-      background: 'radial-gradient(ellipse at 55% 20%, #92400e 0%, #3c1a06 100%)',
-      display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-      padding: '20px 10px 48px',
+      background: 'linear-gradient(160deg, #1a0800 0%, #2d0f00 40%, #1a0800 100%)',
+      display: 'flex', justifyContent: 'center', padding: '20px 16px 48px',
+      fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
     }}>
-      <Confetti show={confetti} />
-      <Toast message={toast} />
+      <div style={{ width: '100%', maxWidth: 440 }}>
 
-      <div style={{ ...paper, width: '100%', maxWidth: 420, boxShadow: '0 30px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.2)' }}>
+        <StepHeader
+          step={step}
+          total={totalSteps}
+          onBack={step > 0 && !overlayPhase ? goBack : null}
+        />
 
-        <div style={{ background: '#92400e', padding: '4px 0' }}><Perforation /></div>
+        {step === 0 && (
+          <StepMode
+            mode={mode} setMode={setMode}
+            currency={currency} setCurrency={setCurrency}
+            onNext={() => setStep(1)}
+          />
+        )}
 
-        <div style={{ padding: '20px 22px 16px' }}>
+        {step === 1 && (
+          <StepPeople
+            members={members} setMembers={setMembers}
+            fairMode={fairMode} setFairMode={setFairMode}
+            history={history}
+            onBack={goBack}
+            onNext={goNext}
+          />
+        )}
 
-          {/* ── HEADER ──────────────────────────────────────────────────── */}
-          <div style={{ textAlign: 'center', marginBottom: 4 }}>
-            <div style={{ fontSize: 11, color: '#a8a29e', letterSpacing: '0.2em' }}>✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦</div>
-            <div style={{ fontSize: 26, fontWeight: 900, letterSpacing: '0.18em', marginTop: 4 }}>THE BILL</div>
-            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.35em', color: '#78716c' }}>D E C I D E R</div>
-            <div style={{ fontSize: 11, color: '#a8a29e', letterSpacing: '0.2em', marginTop: 4 }}>✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦</div>
-            <div style={{ fontSize: 11, color: '#78716c', marginTop: 8, letterSpacing: '0.04em', lineHeight: 1.7 }}>
-              TABLE FOR {members.length}<br />
-              {headerTimestamp()}
-            </div>
-            <div style={{ fontSize: 12, color: '#57534e', marginTop: 6, fontStyle: 'italic' }}>
-              Let fate decide who pays. 🍽️
-            </div>
-          </div>
+        {step === 2 && (
+          <StepDecide
+            mode={mode} members={members} currency={currency}
+            billAmount={billAmount} setBillAmount={setBillAmount}
+            tipValue={tipValue} setTipValue={setTipValue}
+            tipType={tipType} setTipType={setTipType}
+            onBack={goBack}
+            onStamp={doStamp}
+            spinning={overlayPhase === 'spinning'}
+          />
+        )}
 
-          <Divider />
-
-          {/* ── 1 · CURRENCY ─────────────────────────────────────────────── */}
-          <div style={labelSt}>Currency</div>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
-            {CURRENCIES.map(c => (
-              <button
-                key={c.code}
-                onClick={() => { setCurrency(c.code); buzz(6) }}
-                style={{
-                  flex: 1, padding: '8px 4px', fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
-                  borderRadius: 8, cursor: 'pointer', minHeight: 40,
-                  border: currency === c.code ? '1.5px solid #1c1917' : '1px solid #d6d3d1',
-                  background: currency === c.code ? '#1c1917' : 'transparent',
-                  color: currency === c.code ? '#faf9f7' : '#57534e',
-                }}
-                aria-pressed={currency === c.code}
-              >
-                {c.symbol} {c.label}
-              </button>
-            ))}
-          </div>
-
-          <Divider />
-
-          {/* ── 2 · MODE ─────────────────────────────────────────────────── */}
-          <div style={labelSt}>1 · Pick a Mode</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 8 }}>
-            {MODES.map(m => (
-              <button
-                key={m.key}
-                onClick={() => { setMode(m.key); again(); buzz(8) }}
-                style={{
-                  fontSize: 12, fontFamily: 'inherit', fontWeight: 700,
-                  padding: '10px 4px', borderRadius: 8, cursor: 'pointer', minHeight: 52,
-                  border: mode === m.key ? '1.5px solid #1c1917' : '1px solid #d6d3d1',
-                  background: mode === m.key ? '#1c1917' : 'transparent',
-                  color: mode === m.key ? '#faf9f7' : '#57534e',
-                  lineHeight: 1.3, transition: 'all 0.12s', WebkitTapHighlightColor: 'transparent',
-                }}
-                aria-pressed={mode === m.key}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-          <div style={{ fontSize: 13, color: '#78716c', textAlign: 'center', marginBottom: 4 }}>
-            {currentMode.desc}
-          </div>
-
-          <Divider />
-
-          {/* ── 3 · PARTY ────────────────────────────────────────────────── */}
-          <div style={labelSt}>2 · Who's at the Table?</div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 20, marginBottom: 14 }}>
-            <button onClick={() => setPartySize(members.length - 1)} disabled={members.length <= 2}
-              style={stepBtnSt(members.length > 2)} aria-label="One fewer person">−</button>
-            <div style={{ textAlign: 'center', minWidth: 70 }}>
-              <div style={{ fontSize: 38, fontWeight: 900, lineHeight: 1 }}>{members.length}</div>
-              <div style={{ fontSize: 11, color: '#a8a29e', textTransform: 'uppercase', letterSpacing: '0.08em' }}>People</div>
-            </div>
-            <button onClick={() => setPartySize(members.length + 1)} disabled={members.length >= 10}
-              style={stepBtnSt(members.length < 10)} aria-label="One more person">+</button>
-          </div>
-
-          <div style={{ fontSize: 11, color: '#a8a29e', marginBottom: 4 }}>
-            Tap a name to edit{fairMode ? ' · right column = % chance of being picked' : ''}:
-          </div>
-          <div>
-            {members.map((m, i) => (
-              <MemberRow
-                key={m.id}
-                member={m}
-                index={i}
-                onNameChange={updateName}
-                onRemove={removeMember}
-                canRemove={members.length > 2}
-                pickCount={history[m.id] ?? 0}
-                odds={odds[i]}
-                fairMode={fairMode}
-              />
-            ))}
-          </div>
-
-          <div style={{ marginTop: 10 }}>
-            <label style={toggleRowSt}>
-              <input type="checkbox" checked={fairMode}
-                onChange={e => { setFairMode(e.target.checked); buzz(8) }}
-                style={{ accentColor: '#dc2626', width: 18, height: 18, flexShrink: 0 }} />
-              <span><strong>Fair mode</strong> — lower odds for frequent payers</span>
-            </label>
-          </div>
-
-          {/* ── 4 · BILL ─────────────────────────────────────────────────── */}
-          {needsBill && (
-            <>
-              <Divider />
-              <div style={labelSt}>3 · The Bill</div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <span style={{ fontSize: 15, fontWeight: 700 }}>Bill total</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <span style={{ color: '#78716c', fontSize: 15 }}>{currInfo?.symbol}</span>
-                  <input type="number" inputMode="decimal" min="0" step="0.01"
-                    value={billAmount} onChange={e => setBillAmount(e.target.value)}
-                    placeholder="0.00" style={inputSt} aria-label="Bill total" />
-                </div>
-              </div>
-
-              {/* round-up toggle */}
-              <label style={{ ...toggleRowSt, marginBottom: 10 }}>
-                <input type="checkbox" checked={roundUp}
-                  onChange={e => { setRoundUp(e.target.checked); buzz(6) }}
-                  style={{ accentColor: '#dc2626', width: 18, height: 18, flexShrink: 0 }} />
-                <span><strong>Round up</strong> — round each share to the nearest whole number</span>
-              </label>
-
-              {/* split mode: optional tip split */}
-              {mode === 'split' && (
-                <>
-                  <label style={toggleRowSt}>
-                    <input type="checkbox" checked={splitTip}
-                      onChange={e => { setSplitTip(e.target.checked); setSplitTipValue(''); buzz(6) }}
-                      style={{ accentColor: '#dc2626', width: 18, height: 18, flexShrink: 0 }} />
-                    <span><strong>Include tip in split</strong> — add tip and split everything equally</span>
-                  </label>
-                  {splitTip && (
-                    <>
-                      <div style={{ display: 'flex', gap: 6, margin: '8px 0' }}>
-                        {TIP_PRESETS.map(p => (
-                          <button key={p} onClick={() => { setSplitTipValue(String(p)); buzz(6) }}
-                            style={{
-                              flex: 1, padding: '8px 0', fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
-                              borderRadius: 8, cursor: 'pointer', minHeight: 40,
-                              border: String(p) === splitTipValue ? '1.5px solid #dc2626' : '1px solid #d6d3d1',
-                              background: String(p) === splitTipValue ? '#fef2f2' : 'transparent',
-                              color: String(p) === splitTipValue ? '#dc2626' : '#57534e',
-                            }}>
-                            {p}%
-                          </button>
-                        ))}
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <span style={{ fontSize: 13, color: '#57534e' }}>Or enter tip %</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                          <input type="number" inputMode="decimal" min="0" step="1"
-                            value={splitTipValue} onChange={e => setSplitTipValue(e.target.value)}
-                            placeholder="18" style={{ ...inputSt, width: 80 }} aria-label="Tip percentage" />
-                          <span style={{ color: '#78716c', fontSize: 14 }}>%</span>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-
-              {/* loser-tip: tip input */}
-              {mode === 'loser-tip' && (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <span style={{ fontSize: 15, fontWeight: 700 }}>Tip</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <button
-                        onClick={() => { setTipType(t => t === 'pct' ? 'amt' : 'pct'); setTipValue('') }}
-                        style={{
-                          fontSize: 14, fontFamily: 'inherit', fontWeight: 700,
-                          width: 40, height: 40, borderRadius: 8, cursor: 'pointer',
-                          border: '1px solid #d6d3d1', background: 'transparent', color: '#57534e',
-                        }}
-                        aria-label="Toggle tip type"
-                      >
-                        {tipType === 'pct' ? '%' : currInfo?.symbol}
-                      </button>
-                      <input type="number" inputMode="decimal" min="0"
-                        step={tipType === 'pct' ? '1' : '0.01'}
-                        value={tipValue} onChange={e => setTipValue(e.target.value)}
-                        placeholder={tipType === 'pct' ? '18' : '0.00'}
-                        style={{ ...inputSt, width: 90 }} aria-label="Tip amount" />
-                    </div>
-                  </div>
-                  {tipType === 'pct' && (
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-                      {TIP_PRESETS.map(p => (
-                        <button key={p} onClick={() => { setTipValue(String(p)); buzz(6) }}
-                          style={{
-                            flex: 1, padding: '8px 0', fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
-                            borderRadius: 8, cursor: 'pointer', minHeight: 40,
-                            border: String(p) === tipValue ? '1.5px solid #dc2626' : '1px solid #d6d3d1',
-                            background: String(p) === tipValue ? '#fef2f2' : 'transparent',
-                            color: String(p) === tipValue ? '#dc2626' : '#57534e',
-                          }}>
-                          {p}%
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* live preview */}
-              {bill > 0 && (
-                <div style={{ background: '#f5f5f4', borderRadius: 8, padding: '10px 12px', marginTop: 4 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#57534e', marginBottom: 2 }}>
-                    <span>Each person (base)</span>
-                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
-                      {fmt(bill / members.length, currency)}
-                    </span>
-                  </div>
-                  {mode === 'loser-tip' && tipAmt > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#dc2626' }}>
-                      <span>Tip (1 unlucky soul)</span>
-                      <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{fmt(tipAmt, currency)}</span>
-                    </div>
-                  )}
-                  {mode === 'split' && splitTip && splitTipAmt > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#57534e' }}>
-                      <span>Tip (split equally)</span>
-                      <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{fmt(splitTipAmt / members.length, currency)} each</span>
-                    </div>
-                  )}
-                  {grandTotal > bill && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, marginTop: 6, paddingTop: 6, borderTop: '1px solid #e7e5e4' }}>
-                      <span>Grand total</span>
-                      <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>{fmt(grandTotal, currency)}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-
-          <Divider />
-
-          {/* ── DECIDE ───────────────────────────────────────────────────── */}
-          <div style={{ ...labelSt, textAlign: 'center' }}>
-            {needsBill ? '4' : '3'} · Decide!
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, margin: '4px 0' }}>
-            <div aria-live="polite" aria-atomic="true"
-              style={{ height: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-              {phase === 'spinning' && (
-                <span style={{
-                  fontSize: 24, fontWeight: 900, letterSpacing: '0.12em', color: '#1c1917',
-                  animation: 'name-spin 0.4s ease-in-out infinite alternate',
-                }}>
-                  {spinName}
-                </span>
-              )}
-              {phase !== 'spinning' && hint && (
-                <span style={{ fontSize: 13, color: '#dc2626', fontWeight: 700 }}>{hint}</span>
-              )}
-            </div>
-
-            <button
-              onClick={stamp}
-              disabled={!canStamp}
-              style={{
-                width: '100%', padding: '18px 0',
-                fontSize: 20, fontFamily: 'inherit', fontWeight: 900,
-                textTransform: 'uppercase', letterSpacing: '0.18em', minHeight: 64,
-                border: '2px solid', borderColor: canStamp ? '#1c1917' : '#d6d3d1', borderRadius: 14,
-                background: canStamp ? '#1c1917' : '#f5f5f4',
-                color: canStamp ? '#faf9f7' : '#a8a29e',
-                cursor: canStamp ? 'pointer' : 'not-allowed',
-                transition: 'transform 0.08s, background 0.15s',
-                WebkitTapHighlightColor: 'transparent',
-              }}
-              onTouchStart={e => { if (canStamp) e.currentTarget.style.transform = 'scale(0.96)' }}
-              onTouchEnd={e => { e.currentTarget.style.transform = 'scale(1)' }}
-              aria-label="Stamp to decide who pays"
-            >
-              {phase === 'spinning' ? '▒ DECIDING… ▒' : '🔖 STAMP IT!'}
+        {/* one-pays: stamp button at bottom of step 1 */}
+        {step === 1 && mode === 'one-pays' && (
+          <div style={{ marginTop: 16 }}>
+            <button onClick={() => { buzz(20); doStamp() }} style={{ ...primaryBtn, fontSize: 20, padding: '20px 24px', borderRadius: 18, animation: 'ready-pulse 2s ease-in-out infinite' }}
+              onTouchStart={e => { e.currentTarget.style.transform = 'scale(0.96)' }}
+              onTouchEnd={e => { e.currentTarget.style.transform = 'scale(1)' }}>
+              🔖 STAMP IT!
             </button>
           </div>
-
-          {/* ── RESULT ───────────────────────────────────────────────────── */}
-          {phase === 'done' && result && (
-            <div ref={resultRef}>
-              <Divider />
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, margin: '8px 0' }}>
-
-                <Stamp winnerName={displayName(result.winner)} mode={result.mode} />
-
-                {(result.mode === 'split' || result.mode === 'loser-tip') && bill > 0 && (
-                  <div style={{ width: '100%' }}>
-                    <div style={{ ...labelSt, textAlign: 'center', marginBottom: 8 }}>Breakdown</div>
-                    <SplitTable
-                      members={members}
-                      shares={result.shares}
-                      tipPayerIdx={result.tipPayerIdx}
-                      tipAmount={result.tipAmount}
-                      displayName={displayName}
-                      currency={currency}
-                    />
-                    <Divider solid />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 17 }}>
-                      <span>TOTAL</span>
-                      <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>{fmt(grandTotal, currency)}</span>
-                    </div>
-                  </div>
-                )}
-
-                {result.mode === 'one-pays' && (
-                  <div style={{ fontSize: 13, color: '#a8a29e', textAlign: 'center' }}>
-                    Better luck next time, everyone else! 😅
-                  </div>
-                )}
-
-                <div style={{ fontSize: 11, color: '#a8a29e', textAlign: 'center' }}>{result.timestamp}</div>
-
-                <button onClick={shareResult} style={{
-                  width: '100%', padding: '15px 0', fontFamily: 'inherit', fontSize: 15, fontWeight: 800,
-                  textTransform: 'uppercase', letterSpacing: '0.08em', minHeight: 52,
-                  border: '2px solid #dc2626', borderRadius: 12, background: '#dc2626', color: '#fff',
-                  cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                }}>
-                  📲 Share with the Group
-                </button>
-
-                <div style={{ display: 'flex', gap: 10, width: '100%' }}>
-                  <button onClick={() => { again(); buzz(8) }} style={actionBtnSt}>↺ Roll Again</button>
-                  <button onClick={reset} style={actionBtnSt}>✕ Reset Tally</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── TALLY ────────────────────────────────────────────────────── */}
-          <TallyBars members={members} history={history} displayName={displayName} />
-
-          {/* ── FOOTER ───────────────────────────────────────────────────── */}
-          <Divider />
-          <div style={{ textAlign: 'center', fontSize: 11, color: '#a8a29e', letterSpacing: '0.06em', lineHeight: 1.9 }}>
-            <div style={{ textTransform: 'uppercase' }}>Thank You For Dining With Us</div>
-            <div>No disputes accepted after stamping.</div>
-            <div style={{ marginTop: 4, letterSpacing: '0.15em' }}>✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦</div>
-          </div>
-        </div>
-
-        <div style={{ background: '#92400e', padding: '4px 0' }}><Perforation /></div>
+        )}
       </div>
 
+      <ResultOverlay
+        phase={overlayPhase}
+        spinName={spinName}
+        result={result}
+        members={members}
+        mode={mode}
+        bill={bill}
+        tipAmt={tipAmt}
+        currency={currency}
+        fairMode={fairMode}
+        history={history}
+        onAgain={handleAgain}
+        onReset={handleReset}
+        onClose={handleClose}
+        reducedMotion={reducedMotion}
+      />
+
+      <Confetti on={confetti} />
+      <Toast msg={toast} />
+
       <style>{`
-        @keyframes name-spin {
-          from { opacity: 0.55; transform: scale(0.95); }
-          to   { opacity: 1;    transform: scale(1.05); }
-        }
-        @keyframes stamp-in {
-          0%   { opacity: 0; transform: rotate(-6deg) scale(1.7); }
-          55%  { opacity: 1; }
-          100% { opacity: 1; transform: rotate(-6deg) scale(1); }
-        }
-        @keyframes confetti-fall {
-          0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
-          100% { transform: translateY(108vh) rotate(720deg); opacity: 0.85; }
+        @keyframes cf {
+          0%   { transform: translateY(0) rotate(0); opacity: 1; }
+          100% { transform: translateY(110vh) rotate(720deg); opacity: 0.8; }
         }
         @keyframes toast-in {
           from { opacity: 0; transform: translate(-50%, 14px); }
           to   { opacity: 1; transform: translate(-50%, 0); }
         }
+        @keyframes spin-name {
+          from { opacity: 0.5; transform: scale(0.94); }
+          to   { opacity: 1;   transform: scale(1.06); }
+        }
+        @keyframes stamp-in {
+          0%   { opacity: 0; transform: rotate(-5deg) scale(1.8); }
+          55%  { opacity: 1; }
+          100% { opacity: 1; transform: rotate(-5deg) scale(1); }
+        }
+        @keyframes slide-up {
+          from { transform: translateY(100%); }
+          to   { transform: translateY(0); }
+        }
+        @keyframes winner-emoji {
+          0%  { transform: scale(0); opacity: 0; }
+          60% { transform: scale(1.3); opacity: 1; }
+          100%{ transform: scale(1);   opacity: 1; }
+        }
+        @keyframes ready-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.4); }
+          50%       { box-shadow: 0 0 0 12px rgba(220,38,38,0); }
+        }
         input[type=number]::-webkit-inner-spin-button,
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         input[type=number] { -moz-appearance: textfield; }
         * { box-sizing: border-box; }
-        button:focus-visible, input:focus-visible {
-          outline: 3px solid #f59e0b; outline-offset: 2px;
-        }
+        button:focus-visible, input:focus-visible { outline: 3px solid #F59E0B; outline-offset: 2px; }
         @media (prefers-reduced-motion: reduce) {
           *, *::before, *::after { animation: none !important; transition: none !important; }
         }
